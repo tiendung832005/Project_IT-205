@@ -47,4 +47,4 @@ public class Invoice {
     public enum InvoiceStatus {
         UNPAID, PAID, FAILED
     }
-} 
+}

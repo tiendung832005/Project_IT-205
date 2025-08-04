@@ -57,18 +57,18 @@ public class UserController {
         }
     }
 
-    // 5. Xác thực email
-    @PostMapping("/verify-email")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SALES', 'CUSTOMER')")
-    public ResponseEntity<ApiResponseDTO<Void>> verifyEmail(@Valid @RequestBody EmailVerificationRequestDTO dto) {
-        try {
-            String username = getCurrentUsername();
-            userService.verifyEmail(username, dto);
-            return ResponseEntity.ok(ApiResponseDTO.success("Xác thực email thành công"));
-        } catch (Exception ex) {
-            return ResponseEntity.badRequest().body(ApiResponseDTO.error(ex.getMessage()));
-        }
-    }
+//    // 5. Xác thực email
+//    @PostMapping("/verify-email")
+//    @PreAuthorize("hasAnyRole('ADMIN', 'SALES', 'CUSTOMER')")
+//    public ResponseEntity<ApiResponseDTO<Void>> verifyEmail(@Valid @RequestBody EmailVerificationRequestDTO dto) {
+//        try {
+//            String username = getCurrentUsername();
+//            userService.verifyEmail(username, dto);
+//            return ResponseEntity.ok(ApiResponseDTO.success("Xác thực email thành công"));
+//        } catch (Exception ex) {
+//            return ResponseEntity.badRequest().body(ApiResponseDTO.error(ex.getMessage()));
+//        }
+//    }
 
     // 5. Lấy danh sách tất cả users (phân trang) - Chỉ ADMIN
     @GetMapping

@@ -77,25 +77,25 @@ public class UserService {
         userRepository.save(user);
     }
 
-    // 4. Xác thực email
-    @Transactional
-    public void verifyEmail(String username, EmailVerificationRequestDTO dto) {
-        User user = userRepository.findByUsernameWithRole(username)
-                .orElseThrow(() -> new RuntimeException("User không tồn tại!"));
-
-        if (user.getIsVerify()) {
-            throw new RuntimeException("Tài khoản đã được xác thực!");
-        }
-
-        // mã xác thực là "123456"
-        if (!"123456".equals(dto.getVerificationCode())) {
-            throw new RuntimeException("Mã xác thực không đúng!");
-        }
-
-        user.setIsVerify(true);
-        user.setUpdatedAt(LocalDate.now());
-        userRepository.save(user);
-    }
+//    // 4. Xác thực email
+//    @Transactional
+//    public void verifyEmail(String username, EmailVerificationRequestDTO dto) {
+//        User user = userRepository.findByUsernameWithRole(username)
+//                .orElseThrow(() -> new RuntimeException("User không tồn tại!"));
+//
+//        if (user.getIsVerify()) {
+//            throw new RuntimeException("Tài khoản đã được xác thực!");
+//        }
+//
+//        // mã xác thực là "123456"
+//        if (!"123456".equals(dto.getVerificationCode())) {
+//            throw new RuntimeException("Mã xác thực không đúng!");
+//        }
+//
+//        user.setIsVerify(true);
+//        user.setUpdatedAt(LocalDate.now());
+//        userRepository.save(user);
+//    }
 
     // 5. Lấy danh sách tất cả users (phân trang)
     public UserListResponseDTO getAllUsers(UserSearchRequestDTO searchRequest) {

@@ -1,11 +1,10 @@
 package com.data.project_it205.service;
 
+import com.data.project_it205.model.dto.request.CancelOrderRequestDTO;
 import com.data.project_it205.model.dto.request.CreateOrderRequestDTO;
+import com.data.project_it205.model.dto.request.UpdateOrderRequestDTO;
 import com.data.project_it205.model.dto.request.UpdateOrderStatusRequestDTO;
-import com.data.project_it205.model.dto.response.ApiResponseDTO;
-import com.data.project_it205.model.dto.response.OrderItemResponseDTO;
-import com.data.project_it205.model.dto.response.OrderListResponseDTO;
-import com.data.project_it205.model.dto.response.OrderResponseDTO;
+import com.data.project_it205.model.dto.response.*;
 import com.data.project_it205.model.entity.*;
 import com.data.project_it205.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,9 +20,12 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.logging.Logger;
 
 @Service
 public class OrderService {
+
+    private static final Logger logger = Logger.getLogger(OrderService.class.getName());
 
     @Autowired
     private OrderRepository orderRepository;
@@ -39,6 +41,9 @@ public class OrderService {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private OrderLogRepository orderLogRepository;
 
     // Lấy thông tin user hiện tại từ JWT
     private User getCurrentUser() {
@@ -159,6 +164,14 @@ public class OrderService {
         // Xóa toàn bộ giỏ hàng
         cartItemRepository.deleteAll(cartItems);
 
+        // Log việc tạo đơn hàng
+        OrderLog orderLog = new OrderLog();
+        orderLog.setOrder(savedOrder);
+        orderLog.setUser(currentUser);
+        orderLog.setAction(OrderLog.LogAction.ORDER_CREATED);
+        orderLog.setReason("Tạo đơn hàng mới");
+        orderLogRepository.save(orderLog);
+
         return convertToDTO(savedOrder);
     }
 
@@ -235,6 +248,158 @@ public class OrderService {
         dto.setQuantity(orderItem.getQuantity());
         dto.setPrice(orderItem.getPrice());
         dto.setTotalPrice(orderItem.getPrice().multiply(BigDecimal.valueOf(orderItem.getQuantity())));
+        return dto;
+    }
+
+    // Cập nhật thông tin đơn hàng (address, notes) - chỉ khi status = PENDING
+    @Transactional
+    public OrderResponseDTO updateOrder(Integer orderId, UpdateOrderRequestDTO requestDTO) {
+        User currentUser = getCurrentUser();
+        String roleName = userRepository.findRoleNameByUsername(currentUser.getUsername());
+
+        Order order;
+        if ("CUSTOMER".equals(roleName)) {
+            // Customer chỉ có thể cập nhật đơn hàng của mình
+            order = orderRepository.findByIdAndUserId(orderId, currentUser.getId())
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng với ID: " + orderId));
+        } else {
+            // ADMIN/SALES có thể cập nhật tất cả đơn hàng
+            order = orderRepository.findById(orderId)
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng với ID: " + orderId));
+        }
+
+        // Kiểm tra trạng thái đơn hàng - chỉ cho phép cập nhật khi PENDING
+        if (order.getStatus() != Order.OrderStatus.PENDING) {
+            throw new RuntimeException("Chỉ có thể cập nhật đơn hàng đang ở trạng thái PENDING");
+        }
+
+        // Cập nhật thông tin
+        order.setShippingAddress(requestDTO.getShippingAddress());
+        order.setInternalNotes(requestDTO.getInternalNotes());
+        order.setUpdatedAt(LocalDate.now());
+
+        Order updatedOrder = orderRepository.save(order);
+
+        // Log việc cập nhật đơn hàng
+        OrderLog orderLog = new OrderLog();
+        orderLog.setOrder(updatedOrder);
+        orderLog.setUser(currentUser);
+        orderLog.setAction(OrderLog.LogAction.ORDER_UPDATED);
+        orderLog.setReason("Cập nhật thông tin đơn hàng");
+        orderLogRepository.save(orderLog);
+
+        return convertToDTO(updatedOrder);
+    }
+
+    // Hủy đơn hàng
+    @Transactional
+    public OrderResponseDTO cancelOrder(Integer orderId, CancelOrderRequestDTO requestDTO) {
+        User currentUser = getCurrentUser();
+        String roleName = userRepository.findRoleNameByUsername(currentUser.getUsername());
+
+        Order order;
+        if ("CUSTOMER".equals(roleName)) {
+            // Customer chỉ có thể hủy đơn hàng của mình
+            order = orderRepository.findByIdAndUserId(orderId, currentUser.getId())
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng với ID: " + orderId));
+        } else {
+            // ADMIN/SALES có thể hủy tất cả đơn hàng
+            order = orderRepository.findById(orderId)
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng với ID: " + orderId));
+        }
+
+        // Kiểm tra trạng thái đơn hàng - chỉ cho phép hủy khi PENDING
+        if (order.getStatus() != Order.OrderStatus.PENDING) {
+            throw new RuntimeException("Chỉ có thể hủy đơn hàng đang ở trạng thái PENDING");
+        }
+
+        // Log lý do hủy
+        logger.info("Đơn hàng ID: " + orderId + " bị hủy bởi user: " + currentUser.getUsername() + 
+                   " - Lý do: " + requestDTO.getCancelReason());
+
+        // Hoàn trả stock của các sản phẩm
+        List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
+        for (OrderItem orderItem : orderItems) {
+            Product product = orderItem.getProduct();
+            product.setStock(product.getStock() + orderItem.getQuantity());
+            productRepository.save(product);
+        }
+
+        // Cập nhật trạng thái đơn hàng
+        order.setStatus(Order.OrderStatus.CANCELLED);
+        order.setUpdatedAt(LocalDate.now());
+
+        Order cancelledOrder = orderRepository.save(order);
+
+        // Log việc hủy đơn hàng
+        OrderLog orderLog = new OrderLog();
+        orderLog.setOrder(cancelledOrder);
+        orderLog.setUser(currentUser);
+        orderLog.setAction(OrderLog.LogAction.ORDER_CANCELLED);
+        orderLog.setReason(requestDTO.getCancelReason());
+        orderLogRepository.save(orderLog);
+
+        return convertToDTO(cancelledOrder);
+    }
+
+    // Lấy danh sách items của một đơn hàng
+    public OrderItemListResponseDTO getOrderItems(Integer orderId) {
+        User currentUser = getCurrentUser();
+        String roleName = userRepository.findRoleNameByUsername(currentUser.getUsername());
+
+        Order order;
+        if ("CUSTOMER".equals(roleName)) {
+            // Customer chỉ có thể xem items của đơn hàng của mình
+            order = orderRepository.findByIdAndUserId(orderId, currentUser.getId())
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng với ID: " + orderId));
+        } else {
+            // ADMIN/SALES có thể xem items của tất cả đơn hàng
+            order = orderRepository.findById(orderId)
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng với ID: " + orderId));
+        }
+
+        List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
+        List<OrderItemResponseDTO> orderItemDTOs = orderItems.stream()
+                .map(this::convertOrderItemToDTO)
+                .collect(Collectors.toList());
+
+        return new OrderItemListResponseDTO(
+                orderId,
+                order.getStatus().toString(),
+                orderItemDTOs,
+                orderItemDTOs.size()
+        );
+    }
+
+    // Lấy logs của đơn hàng (chỉ admin/sales)
+    public List<OrderLogResponseDTO> getOrderLogs(Integer orderId) {
+        User currentUser = getCurrentUser();
+        String roleName = userRepository.findRoleNameByUsername(currentUser.getUsername());
+
+        // Chỉ admin/sales mới có thể xem logs
+        if ("CUSTOMER".equals(roleName)) {
+            throw new RuntimeException("Bạn không có quyền xem logs của đơn hàng");
+        }
+
+        // Kiểm tra đơn hàng tồn tại
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng với ID: " + orderId));
+
+        List<OrderLog> orderLogs = orderLogRepository.findByOrderIdOrderByCreatedAtDesc(orderId);
+        
+        return orderLogs.stream()
+                .map(this::convertOrderLogToDTO)
+                .collect(Collectors.toList());
+    }
+
+    private OrderLogResponseDTO convertOrderLogToDTO(OrderLog orderLog) {
+        OrderLogResponseDTO dto = new OrderLogResponseDTO();
+        dto.setId(orderLog.getId());
+        dto.setOrderId(orderLog.getOrder().getId());
+        dto.setUsername(orderLog.getUser().getUsername());
+        dto.setAction(orderLog.getAction().toString());
+        dto.setReason(orderLog.getReason());
+        dto.setCreatedAt(orderLog.getCreatedAt());
         return dto;
     }
 }
